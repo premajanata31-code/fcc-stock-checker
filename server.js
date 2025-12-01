@@ -1,14 +1,30 @@
 'use strict';
 require('dotenv').config();
-const express     = require('express');
-const bodyParser  = require('body-parser');
-const cors        = require('cors');
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+const helmet = require('helmet'); // Security
+const mongoose = require('mongoose'); // Database
 
-const apiRoutes         = require('./routes/api.js');
-const fccTestingRoutes  = require('./routes/fcctesting.js');
-const runner            = require('./test-runner');
+const apiRoutes = require('./routes/api.js');
+const fccTestingRoutes = require('./routes/fcctesting.js');
+const runner = require('./test-runner');
 
 const app = express();
+
+// 1. Security Features
+app.use(helmet.contentSecurityPolicy({
+  directives: {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'", "'unsafe-inline'"],
+    styleSrc: ["'self'", "'unsafe-inline'"]
+  }
+}));
+app.use(helmet.hidePoweredBy());
+app.use(helmet.frameguard({ action: 'deny' }));
+app.use(helmet.xssFilter());
+app.use(helmet.noSniff());
+app.use(helmet.ieNoOpen());
 
 app.use('/public', express.static(process.cwd() + '/public'));
 
@@ -16,6 +32,17 @@ app.use(cors({origin: '*'})); //For FCC testing purposes only
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+
+// 2. DATABASE CONNECTION (Bagian Penting!)
+console.log("Mencoba menghubungkan ke MongoDB...");
+mongoose.connect(process.env.DB)
+.then(() => {
+  console.log("✅ SUKSES: MongoDB Connected!");
+})
+.catch((err) => {
+  console.error("❌ ERROR: Gagal connect ke Database.");
+  console.error(err);
+});
 
 //Index page (static HTML)
 app.route('/')
@@ -37,8 +64,9 @@ app.use(function(req, res, next) {
 });
 
 //Start our server and tests!
-const listener = app.listen(process.env.PORT || 3000, function () {
-  console.log('Your app is listening on port ' + listener.address().port);
+const port = process.env.PORT || 3000;
+app.listen(port, function () {
+  console.log('Listening on port ' + port);
   if(process.env.NODE_ENV==='test') {
     console.log('Running Tests...');
     setTimeout(function () {
