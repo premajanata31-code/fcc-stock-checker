@@ -3,8 +3,8 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const helmet = require('helmet'); // Security
-const mongoose = require('mongoose'); // Database
+const helmet = require('helmet');
+const mongoose = require('mongoose');
 
 const apiRoutes = require('./routes/api.js');
 const fccTestingRoutes = require('./routes/fcctesting.js');
@@ -12,67 +12,66 @@ const runner = require('./test-runner');
 
 const app = express();
 
-// 1. Security Features
-app.use(helmet.contentSecurityPolicy({
-  directives: {
-    defaultSrc: ["'self'"],
-    scriptSrc: ["'self'", "'unsafe-inline'"],
-    styleSrc: ["'self'", "'unsafe-inline'"]
-  }
-}));
+// Security headers + CSP
+app.use(
+  helmet.contentSecurityPolicy({
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"]
+    }
+  })
+);
 app.use(helmet.hidePoweredBy());
 app.use(helmet.frameguard({ action: 'deny' }));
-app.use(helmet.xssFilter());
 app.use(helmet.noSniff());
-app.use(helmet.ieNoOpen());
 
 app.use('/public', express.static(process.cwd() + '/public'));
-
-app.use(cors({origin: '*'})); //For FCC testing purposes only
-
+app.use(cors({ origin: '*' })); // FCC testing only
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// 2. DATABASE CONNECTION (Bagian Penting!)
-console.log("Mencoba menghubungkan ke MongoDB...");
-mongoose.connect(process.env.DB)
-.then(() => {
-  console.log("✅ SUKSES: MongoDB Connected!");
-})
-.catch((err) => {
-  console.error("❌ ERROR: Gagal connect ke Database.");
-  console.error(err);
-});
-
-//Index page (static HTML)
-app.route('/')
-  .get(function (req, res) {
-    res.sendFile(process.cwd() + '/views/index.html');
+// Database connection
+console.log('Mencoba menghubungkan ke MongoDB...');
+mongoose
+  .connect(process.env.DB)
+  .then(() => {
+    console.log('✅ SUKSES: MongoDB Connected!');
+  })
+  .catch((err) => {
+    console.error('❌ ERROR: Gagal connect ke Database.');
+    console.error(err);
   });
 
-//For FCC testing purposes
-fccTestingRoutes(app);
-
-//Routing for API 
-apiRoutes(app);  
-    
-//404 Not Found Middleware
-app.use(function(req, res, next) {
-  res.status(404)
-    .type('text')
-    .send('Not Found');
+// Index page
+app.route('/').get(function (req, res) {
+  res.sendFile(process.cwd() + '/views/index.html');
 });
 
-//Start our server and tests!
+// FCC testing
+fccTestingRoutes(app);
+
+// API routes
+apiRoutes(app);
+
+// 404
+app.use(function (req, res, next) {
+  res.status(404).type('text').send('Not Found');
+});
+
+// Start server & tests
 const port = process.env.PORT || 3000;
 app.listen(port, function () {
   console.log('Listening on port ' + port);
-  if(process.env.NODE_ENV==='test') {
+  if (process.env.NODE_ENV === 'test') {
     console.log('Running Tests...');
     setTimeout(function () {
       try {
         runner.run();
-      } catch(e) {
+      } catch (e) {
         console.log('Tests are not valid:');
         console.error(e);
       }
@@ -80,4 +79,4 @@ app.listen(port, function () {
   }
 });
 
-module.exports = app; //for testing
+module.exports = app;
