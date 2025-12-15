@@ -4,7 +4,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const helmet = require('helmet');
-const mongoose = require('mongoose');
+const mongoose = require('mongoose'); // Tambahkan mongoose di sini
 
 const apiRoutes = require('./routes/api.js');
 const fccTestingRoutes = require('./routes/fcctesting.js');
@@ -12,66 +12,60 @@ const runner = require('./test-runner');
 
 const app = express();
 
-// Security headers + CSP
-app.use(
-  helmet.contentSecurityPolicy({
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'"],
-      imgSrc: ["'self'"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"]
-    }
-  })
-);
-app.use(helmet.hidePoweredBy());
-app.use(helmet.frameguard({ action: 'deny' }));
-app.use(helmet.noSniff());
-
 app.use('/public', express.static(process.cwd() + '/public'));
-app.use(cors({ origin: '*' })); // FCC testing only
+app.use(cors({origin: '*'}));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Database connection
-console.log('Mencoba menghubungkan ke MongoDB...');
-mongoose
-  .connect(process.env.DB)
-  .then(() => {
-    console.log('✅ SUKSES: MongoDB Connected!');
-  })
-  .catch((err) => {
-    console.error('❌ ERROR: Gagal connect ke Database.');
-    console.error(err);
+// --- SECURITY (Helmet) ---
+// Perbaikan CSP agar script & style bisa jalan
+app.use(helmet.contentSecurityPolicy({
+  directives: {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'"],
+    styleSrc: ["'self'"],
+  }
+}));
+
+// Mencegah sniffing MIME type & XSS Filter (bawaan helmet default sebenarnya sudah ok, tapi eksplisit lebih baik)
+app.use(helmet.noSniff());
+app.use(helmet.xssFilter());
+
+
+// --- DATABASE CONNECTION ---
+mongoose.connect(process.env.DB, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log("Database connected successfully"))
+  .catch(err => console.log("Database connection error: ", err));
+
+
+//Index page (static HTML)
+app.route('/')
+  .get(function (req, res) {
+    res.sendFile(process.cwd() + '/views/index.html');
   });
 
-// Index page
-app.route('/').get(function (req, res) {
-  res.sendFile(process.cwd() + '/views/index.html');
-});
-
-// FCC testing
+//For FCC testing purposes
 fccTestingRoutes(app);
 
-// API routes
-apiRoutes(app);
-
-// 404
-app.use(function (req, res, next) {
-  res.status(404).type('text').send('Not Found');
+//Routing for API 
+apiRoutes(app);  
+    
+//404 Not Found Middleware
+app.use(function(req, res, next) {
+  res.status(404)
+    .type('text')
+    .send('Not Found');
 });
 
-// Start server & tests
-const port = process.env.PORT || 3000;
-app.listen(port, function () {
-  console.log('Listening on port ' + port);
-  if (process.env.NODE_ENV === 'test') {
+//Start our server and tests!
+const listener = app.listen(process.env.PORT || 3000, function () {
+  console.log('Your app is listening on port ' + listener.address().port);
+  if(process.env.NODE_ENV==='test') {
     console.log('Running Tests...');
     setTimeout(function () {
       try {
         runner.run();
-      } catch (e) {
+      } catch(e) {
         console.log('Tests are not valid:');
         console.error(e);
       }
@@ -79,4 +73,4 @@ app.listen(port, function () {
   }
 });
 
-module.exports = app;
+module.exports = app; //for testing
