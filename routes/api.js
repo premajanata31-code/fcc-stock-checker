@@ -1,125 +1,87 @@
 'use strict';
-
-const mongoose = require('mongoose');
 const fetch = require('node-fetch');
+const mongoose = require('mongoose');
+
+// Definisi Schema & Model langsung di sini
+const StockSchema = new mongoose.Schema({
+  symbol: { type: String, required: true },
+  likes: { type: [String], default: [] } // Array IP address
+});
+const Stock = mongoose.model('Stock', StockSchema);
+
+// Fungsi hash sederhana untuk anonimkan IP
 const crypto = require('crypto');
+function anonymize(ip) {
+  return crypto.createHash('sha256').update(ip).digest('hex');
+}
 
 module.exports = function (app) {
-  // Model
-  const stockSchema = new mongoose.Schema({
-    symbol: { type: String, required: true, unique: true },
-    likes: { type: [String], default: [] }
-  });
 
-  const Stock = mongoose.model('Stock', stockSchema);
-
-  // Ambil harga saham dari proxy freeCodeCamp
-  async function getStockPrice(stockSymbol) {
-    const url = `https://stock-price-checker-proxy.freecodecamp.rocks/v1/stock/${stockSymbol}/quote`;
-    try {
-      const response = await fetch(url);
-      const data = await response.json();
-      return data;
-    } catch (err) {
-      console.error('Error fetching stock price:', err);
-      return null;
-    }
+  // Fungsi helper untuk mengambil harga
+  async function getStockPrice(stock) {
+    const response = await fetch(`https://stock-price-checker-proxy.freecodecamp.rocks/v1/stock/${stock}/quote`);
+    const data = await response.json();
+    return { stock: data.symbol, price: data.latestPrice };
   }
 
-  // Update stock atau buat baru
-  async function findUpdateStock(symbol, like, ipHash) {
-    try {
-      let stockDoc = await Stock.findOne({ symbol });
-      if (!stockDoc) {
-        stockDoc = new Stock({ symbol, likes: [] });
-      }
-
-      if (like && !stockDoc.likes.includes(ipHash)) {
-        stockDoc.likes.push(ipHash);
-      }
-
-      await stockDoc.save();
-      return stockDoc;
-    } catch (err) {
-      console.error('Error updating stock:', err);
-      return null;
+  // Fungsi helper untuk load/save like
+  async function loadStockData(stock, like, ip) {
+    const symbol = stock.toUpperCase();
+    let stockData = await Stock.findOne({ symbol });
+    
+    if (!stockData) {
+      stockData = new Stock({ symbol, likes: [] });
     }
+
+    if (like === 'true') {
+      const hashedIp = anonymize(ip);
+      if (!stockData.likes.includes(hashedIp)) {
+        stockData.likes.push(hashedIp);
+        await stockData.save();
+      }
+    } else {
+      // Pastikan disave kalau baru dibuat meskipun tidak di-like
+      if (stockData.isNew) await stockData.save();
+    }
+    
+    return stockData.likes.length;
   }
 
-  app
-    .route('/api/stock-prices')
+  app.route('/api/stock-prices')
     .get(async function (req, res) {
-      try {
-        const { stock, like } = req.query;
+      const { stock, like } = req.query;
+      const ip = req.ip;
 
-        if (!stock) {
-          return res.json({ error: 'stock required' });
-        }
+      // Kasus 1: Array (Dua Saham)
+      if (Array.isArray(stock)) {
+        const stock1Symbol = stock[0];
+        const stock2Symbol = stock[1];
 
-        const isLike = like === 'true';
+        const price1 = await getStockPrice(stock1Symbol);
+        const likes1 = await loadStockData(stock1Symbol, like, ip);
 
-        // Hash IP
-        const ipHash = crypto
-          .createHash('sha256')
-          .update(req.ip || 'unknown')
-          .digest('hex');
+        const price2 = await getStockPrice(stock2Symbol);
+        const likes2 = await loadStockData(stock2Symbol, like, ip);
 
-        // Convert ke array dan uppercase
-        let stocks = Array.isArray(stock) ? stock : [stock];
-        stocks = stocks.map((s) => String(s).toUpperCase().trim());
+        res.json({
+          stockData: [
+            { stock: price1.stock, price: price1.price, rel_likes: likes1 - likes2 },
+            { stock: price2.stock, price: price2.price, rel_likes: likes2 - likes1 }
+          ]
+        });
 
-        if (stocks.length > 2) {
-          return res.json({ error: 'maximum 2 stocks' });
-        }
-
-        const stockDataArray = [];
-
-        // Ambil data setiap stock
-        for (let symbol of stocks) {
-          const priceData = await getStockPrice(symbol);
-          const dbData = await findUpdateStock(symbol, isLike, ipHash);
-
-          let obj = {
-            stock: symbol
-          };
-
-          if (priceData && priceData.latestPrice) {
-            obj.price = Number(priceData.latestPrice);
-          } else {
-            obj.price = null;
+      // Kasus 2: Single String (Satu Saham)
+      } else {
+        const price = await getStockPrice(stock);
+        const likes = await loadStockData(stock, like, ip);
+        
+        res.json({
+          stockData: {
+            stock: price.stock,
+            price: price.price,
+            likes: likes
           }
-
-          if (dbData) {
-            obj.likes = dbData.likes.length;
-          } else {
-            obj.likes = 0;
-          }
-
-          stockDataArray.push(obj);
-        }
-
-        // Single stock
-        if (stocks.length === 1) {
-          return res.json({ stockData: stockDataArray[0] });
-        }
-
-        // Dual stocks - tambah rel_likes
-        if (stocks.length === 2) {
-          const stock1 = stockDataArray[0];
-          const stock2 = stockDataArray[1];
-
-          stock1.rel_likes = stock1.likes - stock2.likes;
-          stock2.rel_likes = stock2.likes - stock1.likes;
-
-          // Hapus likes, ganti dengan rel_likes
-          delete stock1.likes;
-          delete stock2.likes;
-
-          return res.json({ stockData: stockDataArray });
-        }
-      } catch (err) {
-        console.error('API Error:', err);
-        return res.json({ error: 'Internal server error' });
+        });
       }
     });
 };
